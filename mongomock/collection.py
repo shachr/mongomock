@@ -16,7 +16,7 @@ try:
 except ImportError:
     json_utils = SON = None
 try:
-    import execjs
+    import execjsn
 except ImportError:
     execjs = None
 
@@ -664,13 +664,13 @@ class Collection(object):
     def find(self, filter=None, projection=None, skip=0, limit=0,
              no_cursor_timeout=False, cursor_type=None, sort=None,
              allow_partial_results=False, oplog_replay=False, modifiers=None,
-             batch_size=0, manipulate=True):
+             batch_size=0, manipulate=True, fields=None, read_preference=None, timeout=None):
         spec = filter
         if spec is None:
             spec = {}
         validate_is_mapping('filter', spec)
         return Cursor(self, functools.partial(
-            self._get_dataset, spec, sort, projection, dict, skip), limit=limit)
+            self._get_dataset, spec, sort, projection, dict, skip), limit=limit,fields=fields)
 
     def _get_dataset(self, spec, sort, fields, as_class, skip):
         dataset = (self._copy_only_fields(document, fields, as_class)
@@ -1667,13 +1667,14 @@ def _resolve_sort_key(key, doc):
 
 class Cursor(object):
 
-    def __init__(self, collection, dataset_factory, limit=0):
+    def __init__(self, collection, dataset_factory, limit=0, fields=None):
         super(Cursor, self).__init__()
         self.collection = collection
         self._factory = dataset_factory
         # pymongo limit defaults to 0, returning everything
         self._limit = limit if limit != 0 else None
         self._skip = None
+        self._fields = fields
         self.rewind()
 
     def __iter__(self):
@@ -1685,14 +1686,25 @@ class Cursor(object):
     def __next__(self):
         if self._skip and not self._skipped:
             for i in range(self._skip):
-                next(self._dataset)
+                self.__projection__(next(self._dataset))
             self._skipped = self._skip
         if self._limit is not None and self._limit <= self._emitted:
             raise StopIteration()
         if self._limit is not None:
             self._emitted += 1
-        return next(self._dataset)
+        return self.__projection__(next(self._dataset))
     next = __next__
+
+    def __projection__(self, item):
+        if self._fields == None:
+            return item
+        else:
+            ret = {}
+            for path in self._fields:
+               field = path.split(".")[0]
+               if field in item:
+                   ret[field] = item[field]
+            return ret
 
     def rewind(self):
         self._dataset = self._factory()
